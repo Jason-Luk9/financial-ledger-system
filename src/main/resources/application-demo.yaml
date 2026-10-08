@@ -1,0 +1,10 @@
+# Opt-in historical fixtures, isolated from the default ledger database.
+spring:
+  datasource:
+    url: ${DEMO_DB_URL:jdbc:postgresql://localhost:5433/ledger_demo}
+    username: ${DEMO_DB_USERNAME:ledger}
+    password: ${DEMO_DB_PASSWORD:ledger}
+  flyway:
+    locations: classpath:db/migration,classpath:db/demo
+server:
+  port: 8081

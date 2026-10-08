@@ -33,6 +33,48 @@ Default database credentials are `ledger` / `ledger`, database `ledger`. Both th
 
 ## API walkthrough
 
+### Historical reconciliation demo
+
+An optional `demo` profile seeds historical inputs so you can exercise the real reconciliation endpoint for **September 2026**.
+It runs beside the normal application using a separate PostgreSQL database (`ledger_demo` on port `5433`) and API port (`8081`).
+It does not change your normal ledger on ports `5432` / `8080`.
+
+In a separate terminal, with Java 21 selected:
+
+```sh
+docker compose -f compose.demo.yaml up --wait
+./mvnw spring-boot:run -Dspring-boot.run.profiles=demo
+```
+
+Open [the demo Swagger UI](http://localhost:8081/swagger-ui.html) and execute `GET /reconciliation` with `month=2026-09`.
+The fixture history is:
+
+| Date, UTC | Event | Account 1, USD | Account 2, SGD |
+|---|---|---:|---:|
+| August 1, 2026 | Opening balances | 1,000 | 1,000 |
+| August 31 | Transfer USD 100 to account 2 | 900 | 1,125 |
+| September 15 | Transfer USD 40 to account 2 | 860 | 1,175 |
+| October 1 | Reverse the September transfer | 900 | 1,125 |
+
+September's report should show `healthy: true`, account 1 opening at `900`, debits of `40`, and expected/recorded closing balances of `860` with discrepancy `0`.
+Account 2 closes at SGD `1175`. The current balances are USD `900` / SGD `1125`: the October reversal changes the current balance but not September's closing balance.
+The normal integrity and history endpoints also work on this dataset. The API still prohibits client backdating; only this opt-in fixture migration creates historical records.
+
+To demonstrate detection of an error, **on this demo database only**, change the September checkpoint from 860 to 865:
+
+```sh
+docker compose -f compose.demo.yaml exec db psql -U ledger -d ledger_demo -c "UPDATE ledger_entries SET balance_after = 865 WHERE account_id = 1 AND transaction_id = (SELECT id FROM transactions WHERE idempotency_key = 'fixture-september-transfer');"
+```
+
+Run the September report again. It should return `healthy: false`, expected closing `860`, recorded closing `865`, and discrepancy `5` for account 1. Restore the fixture afterward:
+
+```sh
+docker compose -f compose.demo.yaml exec db psql -U ledger -d ledger_demo -c "UPDATE ledger_entries SET balance_after = 860 WHERE account_id = 1 AND transaction_id = (SELECT id FROM transactions WHERE idempotency_key = 'fixture-september-transfer');"
+```
+
+Fixtures are inserted once and survive restarts. The migration refuses to seed a database other than `ledger_demo`, or overwrite non-pristine accounts/history.
+Stop the demo API with Ctrl+C and its database with `docker compose -f compose.demo.yaml down`. Adding `--volumes` to that **demo** command deletes only its demo volume for a fresh run.
+
 ### Swagger UI
 
 After starting the application, open **[Swagger UI](http://localhost:8080/swagger-ui.html)** to browse and execute requests.
@@ -116,7 +158,7 @@ Reconcile a completed UTC calendar month:
 curl -sS 'http://localhost:8080/reconciliation?month=2026-09'
 ```
 
-Choose a completed month from your ledger's lifetime. A newly initialized ledger has no historical transactions: earlier months explicitly return `UNAVAILABLE` rather than a false success. Current/future months return `400`. The integration tests create controlled historical transactions to demonstrate month-end behavior without waiting for a calendar month to pass.
+Choose a completed month from your ledger's lifetime. A newly initialized normal ledger has no historical transactions: earlier months explicitly return `UNAVAILABLE` rather than a false success. Current/future months return `400`. Use the historical demo above or the controlled integration tests to demonstrate month-end behavior without waiting for a calendar month to pass.
 
 An integrity or reconciliation request returns `200` even when it detects discrepancies; inspect `healthy`, `issues`, and the account figures. Reports never repair data. Discrepancy means **actual/recorded minus expected**.
 
@@ -220,6 +262,19 @@ This runs unit tests, packages the executable JAR, and runs integration tests ag
 | Ledger integrity | Deliberately corrupted balances, missing entries, and incorrect stored conversion rates |
 | Month-end reconciliation | UTC boundaries, inactive months, unavailable/partial history, earlier corruption, and later reversals |
 | Swagger UI and OpenAPI | UI assets, local API configuration, all endpoint schemas, examples, required keys, and response codes |
+| Historical demo | September HTTP report, October reversal cutoff, deliberate checkpoint discrepancy, one-time seeding, and refusal to overwrite normal/existing data |
+
+The concurrency tests issue overlapping service calls on eight worker threads against real PostgreSQL: 16 retries of one key post once; 20 attempts to spend USD 100 from USD 1,000 produce exactly 10 successes; and 40 transfers in opposite directions preserve the expected balances. Run just these scenarios with:
+
+```sh
+./mvnw '-Dit.test=LedgerIT#concurrentDuplicatesPostExactlyOnce+simultaneousSpendingCannotOverdraw+oppositeDirectionTransfersDoNotLoseUpdatesOrDeadlock' verify
+```
+
+To verify the demo fixtures and discrepancy detection in isolation:
+
+```sh
+./mvnw -Dit.test=HistoricalDemoIT verify
+```
 
 For a packaged run after verification:
 
