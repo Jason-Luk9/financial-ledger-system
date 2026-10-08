@@ -62,6 +62,56 @@ class LedgerIT {
     }
 
     @Test
+    void openApiDocumentsAllEndpointsWithoutChangingTheLedger() throws Exception {
+        var response = get("/v3/api-docs");
+        assertThat(response.statusCode()).isEqualTo(200);
+        var document = JsonPath.parse(response.body());
+        assertThat(document.<String>read("$.info.title")).isEqualTo("Internal Ledger API");
+        assertThat(document.<Map<String, Object>>read("$.paths")).containsOnlyKeys(
+                "/transactions", "/transactions/{id}/reversal", "/accounts/{id}",
+                "/accounts/{id}/transactions", "/ledger/integrity", "/reconciliation");
+        for (String path : List.of("/transactions", "/transactions/{id}/reversal")) {
+            String operation = "$.paths['" + path + "'].post";
+            assertThat(document.<List<Boolean>>read(operation + ".parameters[?(@.name == 'Idempotency-Key')].required"))
+                    .containsExactly(true);
+            assertThat(document.<Map<String, Object>>read(operation + ".responses"))
+                    .containsKeys("200", "201", "400", "404", "409", "422", "503");
+            assertThat(document.<String>read(operation + ".responses['422'].content['application/json'].schema['$ref']"))
+                    .isEqualTo("#/components/schemas/ErrorView");
+            assertThat(document.<String>read(operation + ".responses['201'].content['application/json'].schema['$ref']"))
+                    .isEqualTo("#/components/schemas/TransactionView");
+            assertThat(document.<Map<String, Object>>read(operation + ".responses['200'].headers"))
+                    .containsKey("Idempotency-Replayed");
+        }
+        assertThat(document.<Number>read("$.components.schemas.TransferRequest.properties.sourceAccountId.example").intValue())
+                .isEqualTo(1);
+        assertThat(document.<Number>read("$.components.schemas.TransferRequest.properties.destinationAccountId.example").intValue())
+                .isEqualTo(2);
+        assertThat(document.<List<String>>read("$.paths['/reconciliation'].get.parameters[?(@.name == 'month')].example"))
+                .containsExactly("2026-09");
+        assertThat(count("transactions")).isZero();
+        assertBalances("1000", "1000");
+    }
+
+    @Test
+    void swaggerUiServesItsPageAssetsAndLocalApiConfiguration() throws Exception {
+        var redirect = get("/swagger-ui.html");
+        assertThat(redirect.statusCode()).isEqualTo(302);
+        assertThat(redirect.headers().firstValue("Location")).contains("/swagger-ui/index.html");
+        var page = get("/swagger-ui/index.html");
+        assertThat(page.statusCode()).isEqualTo(200);
+        assertThat(page.body()).contains("swagger-ui-bundle.js", "swagger-initializer.js");
+        assertThat(get("/swagger-ui/swagger-ui-bundle.js").statusCode()).isEqualTo(200);
+        assertThat(get("/swagger-ui/swagger-ui.css").statusCode()).isEqualTo(200);
+        var initializer = get("/swagger-ui/swagger-initializer.js");
+        assertThat(initializer.statusCode()).isEqualTo(200);
+        assertThat(initializer.body()).contains("/v3/api-docs/swagger-config");
+        var config = get("/v3/api-docs/swagger-config");
+        assertThat(config.statusCode()).isEqualTo(200);
+        assertThat(JsonPath.<String>read(config.body(), "$.url")).isEqualTo("/v3/api-docs");
+    }
+
+    @Test
     void transfersAndHistoryExposeBothAmountsAndDeterministicPagination() throws Exception {
         var response = post("/transactions", "first", body(1, 2, "100.00"));
         assertThat(response.statusCode()).isEqualTo(201);

@@ -20,3 +20,11 @@ ledger:
   fx:
     usd-to-sgd: ${USD_TO_SGD:1.25}
     sgd-to-usd: ${SGD_TO_USD:0.80}
+springdoc:
+  override-with-generic-response: false
+  swagger-ui:
+    path: /swagger-ui.html
+    disable-swagger-default-url: true
+    operations-sorter: alpha
+    tags-sorter: alpha
+    doc-expansion: none

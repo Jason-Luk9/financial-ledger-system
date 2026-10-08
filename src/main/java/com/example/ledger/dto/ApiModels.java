@@ -1,6 +1,7 @@
 package com.example.ledger.dto;
 
 import com.example.ledger.model.LedgerTransaction;
+import io.swagger.v3.oas.annotations.media.Schema;
 import jakarta.validation.constraints.*;
 import java.math.BigDecimal;
 import java.time.Instant;
@@ -9,10 +10,17 @@ import java.util.List;
 public final class ApiModels {
     private ApiModels() {}
 
-    public record TransferRequest(@NotNull @Positive Long sourceAccountId,
+    @Schema(description = "Transfer amount is expressed in the source account's currency.",
+            example = "{\"sourceAccountId\":1,\"destinationAccountId\":2,\"amount\":100.00}")
+    public record TransferRequest(
+            @Schema(description = "Source account: 1 is USD; 2 is SGD", example = "1")
+            @NotNull @Positive Long sourceAccountId,
+            @Schema(description = "Destination must differ from source", example = "2")
             @NotNull @Positive Long destinationAccountId,
+            @Schema(description = "Positive source-currency amount with at most two decimal places", example = "100.00")
             @NotNull @DecimalMin(value = "0", inclusive = false) @Digits(integer = 17, fraction = 2) BigDecimal amount) {}
 
+    @Schema(description = "Original exchange-rate quote. A reversal retains the original quote direction and rate.")
     public record RateView(String sourceCurrency, String destinationCurrency, BigDecimal rate) {}
 
     public record TransactionView(Long id, String status, Long sourceAccountId, Long destinationAccountId,
@@ -32,7 +40,9 @@ public final class ApiModels {
     public record AccountView(Long id, String currency, BigDecimal balance) {}
     public record HistoryItem(Long entryId, BigDecimal change, BigDecimal balanceAfter, TransactionView transaction) {}
     public record HistoryPage(List<HistoryItem> items, int page, int size, long totalElements, int totalPages) {}
-    public record ErrorView(String code, String message) {}
+    public record ErrorView(
+            @Schema(example = "INSUFFICIENT_FUNDS") String code,
+            @Schema(example = "Source account has insufficient funds") String message) {}
     public record BalanceCheck(Long accountId, String currency, BigDecimal expected, BigDecimal actual, BigDecimal discrepancy) {}
     public record CurrencyCheck(String currency, BigDecimal expected, BigDecimal actual, BigDecimal discrepancy) {}
     public record IntegrityReport(Instant checkedAt, boolean healthy, List<BalanceCheck> accounts,

@@ -33,6 +33,21 @@ Default database credentials are `ledger` / `ledger`, database `ledger`. Both th
 
 ## API walkthrough
 
+### Swagger UI
+
+After starting the application, open **[Swagger UI](http://localhost:8080/swagger-ui.html)** to browse and execute requests.
+The generated OpenAPI document is at [http://localhost:8080/v3/api-docs](http://localhost:8080/v3/api-docs).
+
+1. Expand **Accounts → Get account balance**, select **Try it out**, enter `1`, and select **Execute**.
+2. Under **Transactions → Transfer money**, use the example body and an `Idempotency-Key` such as `swagger-transfer-1`.
+3. Execute again with the same key/body to see an idempotent replay. Use a new key for another intentional transfer.
+4. To reverse it, enter the returned transaction ID under **Reverse a transfer**, with a separate key such as `swagger-reversal-1`.
+
+POST operations in Swagger UI change the running ledger. The UI includes request examples, required headers, response schemas, and error descriptions.
+The Swagger integration uses [springdoc-openapi](https://springdoc.org/). The terminal examples below remain available.
+
+### Terminal examples
+
 Read the starting balance:
 
 ```sh
@@ -128,7 +143,7 @@ Errors use `{ "code": "INSUFFICIENT_FUNDS", "message": "Source account has insuf
 ```text
 src/main/java/com/example/ledger/
 ├── LedgerApplication.java
-├── config/          # Validated exchange-rate configuration
+├── config/          # Exchange-rate configuration and OpenAPI metadata
 ├── controller/      # REST endpoints and HTTP error mapping
 ├── dto/             # Request, response, and report records
 ├── exception/       # Explicit business failures
@@ -204,6 +219,7 @@ This runs unit tests, packages the executable JAR, and runs integration tests ag
 | Reversals | Exact rounded refunds despite unavailable rate provider, spent funds, retry, duplicate and concurrent reversals |
 | Ledger integrity | Deliberately corrupted balances, missing entries, and incorrect stored conversion rates |
 | Month-end reconciliation | UTC boundaries, inactive months, unavailable/partial history, earlier corruption, and later reversals |
+| Swagger UI and OpenAPI | UI assets, local API configuration, all endpoint schemas, examples, required keys, and response codes |
 
 For a packaged run after verification:
 
