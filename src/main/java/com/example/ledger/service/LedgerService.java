@@ -96,4 +96,21 @@ public class LedgerService {
                 .orElseThrow(() -> LedgerException.missing("Account " + id + " does not exist"));
     }
 
+    @Transactional(readOnly = true)
+    public AccountView balance(Long id) {
+        Account a = accounts.findById(id).orElseThrow(() -> LedgerException.missing("Account " + id + " does not exist"));
+        return new AccountView(a.getId(), a.getCurrency(), a.getBalance());
+    }
+
+    @Transactional(readOnly = true, isolation = org.springframework.transaction.annotation.Isolation.REPEATABLE_READ)
+    public HistoryPage history(Long id, int page, int size) {
+        if (page < 0 || size < 1 || size > 100) {
+            throw LedgerException.badRequest("INVALID_PAGE", "page must be nonnegative and size must be between 1 and 100");
+        }
+        if (!accounts.existsById(id)) throw LedgerException.missing("Account " + id + " does not exist");
+        var result = entries.history(id, PageRequest.of(page, size));
+        var items = result.map(e -> new HistoryItem(e.getId(), e.getAmount(), e.getBalanceAfter(),
+                TransactionView.of(transactions.findById(e.getTransactionId()).orElseThrow()))).getContent();
+        return new HistoryPage(items, page, size, result.getTotalElements(), result.getTotalPages());
+    }
 }

@@ -20,6 +20,14 @@ class LedgerController {
         return response(ledger.transfer(key, request));
     }
 
+    @GetMapping("/accounts/{id}")
+    AccountView balance(@PathVariable Long id) { return ledger.balance(id); }
+
+    @GetMapping("/accounts/{id}/transactions")
+    HistoryPage history(@PathVariable Long id, @RequestParam(defaultValue = "0") int page, @RequestParam(defaultValue = "20") int size) {
+        return ledger.history(id, page, size);
+    }
+
     private ResponseEntity<TransactionView> response(PostingResult result) {
         return ResponseEntity.status(result.replay() ? 200 : 201)
                 .header("Idempotency-Replayed", Boolean.toString(result.replay())).body(result.transaction());
