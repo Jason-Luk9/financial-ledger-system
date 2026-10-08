@@ -1,6 +1,7 @@
 package com.example.ledger.controller;
 
 import com.example.ledger.service.LedgerService;
+import com.example.ledger.service.ReconciliationService;
 import static com.example.ledger.dto.ApiModels.*;
 
 import jakarta.validation.Valid;
@@ -10,9 +11,11 @@ import org.springframework.web.bind.annotation.*;
 @RestController
 class LedgerController {
     private final LedgerService ledger;
+    private final ReconciliationService reconciliation;
 
-    LedgerController(LedgerService ledger) {
+    LedgerController(LedgerService ledger, ReconciliationService reconciliation) {
         this.ledger = ledger;
+        this.reconciliation = reconciliation;
     }
 
     @PostMapping("/transactions")
@@ -32,6 +35,12 @@ class LedgerController {
     HistoryPage history(@PathVariable Long id, @RequestParam(defaultValue = "0") int page, @RequestParam(defaultValue = "20") int size) {
         return ledger.history(id, page, size);
     }
+
+    @GetMapping("/ledger/integrity")
+    IntegrityReport integrity() { return reconciliation.integrity(); }
+
+    @GetMapping("/reconciliation")
+    MonthlyReport monthly(@RequestParam String month) { return reconciliation.monthly(month); }
 
     private ResponseEntity<TransactionView> response(PostingResult result) {
         return ResponseEntity.status(result.replay() ? 200 : 201)
