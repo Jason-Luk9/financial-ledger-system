@@ -56,6 +56,26 @@ public class LedgerService {
         return post(key, fingerprint, source, destination, amount, Money.convert(amount, rate), rate, null);
     }
 
+    @Transactional
+    public PostingResult reverse(String key, Long originalId) {
+        validateKey(key);
+        List<Account> locked = accounts.lockAccounts();
+        String fingerprint = "REVERSAL:" + originalId;
+        PostingResult replay = replay(key, fingerprint);
+        if (replay != null) return replay;
+        LedgerTransaction original = transactions.findById(originalId)
+                .orElseThrow(() -> LedgerException.missing("Transaction " + originalId + " does not exist"));
+        if (original.getReversalOf() != null) {
+            throw LedgerException.conflict("REVERSAL_OF_REVERSAL", "A reversal cannot itself be reversed");
+        }
+        if (transactions.existsByReversalOf(originalId)) {
+            throw LedgerException.conflict("ALREADY_REVERSED", "This transaction has already been reversed");
+        }
+        return post(key, fingerprint, account(locked, original.getDestinationAccountId()),
+                account(locked, original.getSourceAccountId()), original.getDestinationAmount(), original.getSourceAmount(),
+                original.getExchangeRate(), originalId);
+    }
+
     private PostingResult post(String key, String fingerprint, Account source, Account destination,
             BigDecimal sourceAmount, BigDecimal destinationAmount, BigDecimal rate, Long reversalOf) {
         if (source.getBalance().compareTo(sourceAmount) < 0) {

@@ -20,6 +20,11 @@ class LedgerController {
         return response(ledger.transfer(key, request));
     }
 
+    @PostMapping("/transactions/{id}/reversal")
+    ResponseEntity<TransactionView> reverse(@RequestHeader("Idempotency-Key") String key, @PathVariable Long id) {
+        return response(ledger.reverse(key, id));
+    }
+
     @GetMapping("/accounts/{id}")
     AccountView balance(@PathVariable Long id) { return ledger.balance(id); }
 
