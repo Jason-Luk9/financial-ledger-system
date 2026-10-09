@@ -12,14 +12,18 @@ import static com.example.ledger.dto.ApiModels.*;
 
 import java.math.BigDecimal;
 import java.time.Clock;
+import java.time.Instant;
 import java.time.temporal.ChronoUnit;
 import java.util.List;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 @Service
 public class LedgerService {
+    private static final Logger log = LoggerFactory.getLogger(LedgerService.class);
     private final AccountRepository accounts;
     private final TransactionRepository transactions;
     private final EntryRepository entries;
@@ -84,16 +88,29 @@ public class LedgerService {
         if (destination.getBalance().add(destinationAmount).compareTo(Money.MAX) > 0) {
             throw LedgerException.unprocessable("BALANCE_LIMIT", "Destination balance would exceed the supported range");
         }
+        Instant timestamp = postingTimestamp(source, destination);
         source.debit(sourceAmount);
         destination.credit(destinationAmount);
 
         LedgerTransaction transaction = new LedgerTransaction(source.getId(), destination.getId(),
                 source.getCurrency(), destination.getCurrency(), sourceAmount, destinationAmount, rate,
-                clock.instant().truncatedTo(ChronoUnit.MICROS), key, fingerprint, reversalOf);
+                timestamp, key, fingerprint, reversalOf);
         transactions.save(transaction);
         entries.save(new LedgerEntry(transaction.getId(), source, sourceAmount.negate()));
         entries.save(new LedgerEntry(transaction.getId(), destination, destinationAmount));
         return new PostingResult(TransactionView.of(transaction), false);
+    }
+
+    private Instant postingTimestamp(Account source, Account destination) {
+        Instant now = clock.instant().truncatedTo(ChronoUnit.MICROS);
+        // Both account locks are held: committed posting order is shared across instances and restarts.
+        Instant timestamp = transactions.latestTimestamp().filter(t -> t.isAfter(now)).orElse(now);
+        if (source.getCreatedAt().isAfter(timestamp)) timestamp = source.getCreatedAt();
+        if (destination.getCreatedAt().isAfter(timestamp)) timestamp = destination.getCreatedAt();
+        if (timestamp.isAfter(now)) {
+            log.warn("Posting timestamp adjusted because the clock is behind: clock={} timestamp={}", now, timestamp);
+        }
+        return timestamp;
     }
 
     private PostingResult replay(String key, String fingerprint) {

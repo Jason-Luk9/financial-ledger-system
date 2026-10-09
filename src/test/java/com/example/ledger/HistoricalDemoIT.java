@@ -18,7 +18,8 @@ import org.testcontainers.postgresql.PostgreSQLContainer;
 
 @Testcontainers
 @ActiveProfiles("demo")
-@SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
+@SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT,
+        properties = "ledger.reconciliation.schedule.enabled=false")
 class HistoricalDemoIT {
     @Container
     static final PostgreSQLContainer POSTGRES = new PostgreSQLContainer("postgres:17-alpine")

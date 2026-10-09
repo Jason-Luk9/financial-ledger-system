@@ -18,6 +18,8 @@ import java.util.*;
 import java.util.concurrent.*;
 import java.util.function.IntFunction;
 import org.junit.jupiter.api.*;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.context.TestConfiguration;
@@ -31,7 +33,8 @@ import org.testcontainers.junit.jupiter.*;
 import org.testcontainers.postgresql.PostgreSQLContainer;
 
 @Testcontainers
-@SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
+@SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT,
+        properties = "ledger.reconciliation.schedule.enabled=false")
 @Import(LedgerIT.TimeConfiguration.class)
 class LedgerIT {
     @Container
@@ -319,6 +322,88 @@ class LedgerIT {
         assertThat(reconciliation.integrity().issues()).anyMatch(s -> s.contains("Missing or incorrect entries"));
         jdbc.update("UPDATE transactions SET exchange_rate = 9");
         assertThat(reconciliation.integrity().issues()).anyMatch(s -> s.contains("Conversion mismatch"));
+    }
+
+    @Test
+    void backwardClockPreservesPostingOrderAndClosingBalances() {
+        clock.set("2026-02-10T12:00:01.123456789Z");
+        var first = ledger.transfer("before-clock-change", request(1, 2, "100")).transaction();
+        clock.set("2026-02-10T12:00:00Z");
+        var second = ledger.transfer("after-clock-change", request(1, 2, "40")).transaction();
+
+        assertThat(first.timestamp()).isEqualTo(Instant.parse("2026-02-10T12:00:01.123456Z"));
+        assertThat(second.timestamp()).isEqualTo(first.timestamp());
+        var history = ledger.history(1L, 0, 20).items();
+        assertThat(history).extracting(item -> item.transaction().id()).containsExactly(first.id(), second.id());
+        assertThat(history).extracting(HistoryItem::balanceAfter)
+                .containsExactly(new BigDecimal("900.00"), new BigDecimal("860.00"));
+        assertBalances("860", "1175");
+        assertThat(reconciliation.integrity().healthy()).isTrue();
+
+        clock.set("2026-03-01T00:00:00Z");
+        var report = reconciliation.monthly("2026-02");
+        assertThat(report.healthy()).isTrue();
+        assertThat(report.accounts().getFirst().recordedClosingBalance()).isEqualByComparingTo("860");
+        assertThat(report.accounts()).allSatisfy(a -> assertThat(a.discrepancy()).isZero());
+    }
+
+    @Test
+    void backwardClockAcrossMonthBoundaryDoesNotReopenThePreviousMonth() {
+        clock.set("2026-02-28T23:59:59.999999Z");
+        ledger.transfer("february", request(1, 2, "100"));
+        clock.set("2026-03-01T00:00:00Z");
+        var march = ledger.transfer("march", request(1, 2, "40")).transaction();
+        clock.set("2026-02-28T23:59:59Z");
+        var afterClockChange = ledger.transfer("still-march", request(1, 2, "10")).transaction();
+        assertThat(afterClockChange.timestamp()).isEqualTo(march.timestamp());
+
+        clock.set("2026-04-01T00:00:00Z");
+        var february = reconciliation.monthly("2026-02");
+        var marchReport = reconciliation.monthly("2026-03");
+        assertThat(february.healthy()).isTrue();
+        assertThat(february.accounts().getFirst().recordedClosingBalance()).isEqualByComparingTo("900");
+        assertThat(marchReport.healthy()).isTrue();
+        assertThat(marchReport.accounts().getFirst().openingBalance()).isEqualByComparingTo("900");
+        assertThat(marchReport.accounts().getFirst().recordedClosingBalance()).isEqualByComparingTo("850");
+        assertThat(reconciliation.integrity().healthy()).isTrue();
+    }
+
+    @Test
+    void reversalAndReplaysPreserveTimestampsWhenClockMovesBackward() {
+        clock.set("2026-02-10T12:00:00Z");
+        var original = ledger.transfer("original-clock", request(1, 2, "100")).transaction();
+        clock.set("2026-02-10T11:00:00Z");
+        var reversal = ledger.reverse("reverse-clock", original.id()).transaction();
+        assertThat(reversal.timestamp()).isEqualTo(original.timestamp());
+        assertBalances("1000", "1000");
+
+        clock.set("2026-02-11T12:00:00Z");
+        ledger.transfer("later", request(1, 2, "10"));
+        clock.set("2026-02-09T12:00:00Z");
+        var originalReplay = ledger.transfer("original-clock", request(1, 2, "100"));
+        var reversalReplay = ledger.reverse("reverse-clock", original.id());
+        assertThat(originalReplay.replay()).isTrue();
+        assertThat(originalReplay.transaction().timestamp()).isEqualTo(original.timestamp());
+        assertThat(reversalReplay.replay()).isTrue();
+        assertThat(reversalReplay.transaction().timestamp()).isEqualTo(reversal.timestamp());
+        assertThat(count("transactions")).isEqualTo(3);
+        assertBalances("990", "1012.50");
+        assertThat(reconciliation.integrity().healthy()).isTrue();
+        clock.set("2026-03-01T00:00:00Z");
+        assertThat(reconciliation.monthly("2026-02").healthy()).isTrue();
+    }
+
+    @ParameterizedTest
+    @CsvSource({"1,2", "2,1"})
+    void firstPostingDoesNotPredateEitherAccount(long source, long destination) {
+        jdbc.update("UPDATE accounts SET created_at = '2026-02-10T00:00:00Z' WHERE id = 1");
+        jdbc.update("UPDATE accounts SET created_at = '2026-02-11T00:00:00Z' WHERE id = 2");
+        clock.set("2026-02-09T12:00:00Z");
+        var transaction = ledger.transfer("account-opening", request(source, destination, "10")).transaction();
+        assertThat(transaction.timestamp()).isEqualTo(Instant.parse("2026-02-11T00:00:00Z"));
+        assertThat(reconciliation.integrity().healthy()).isTrue();
+        clock.set("2026-03-01T00:00:00Z");
+        assertThat(reconciliation.monthly("2026-02").healthy()).isTrue();
     }
 
     @Test

@@ -21,8 +21,9 @@ public class OpenApiConfig {
                                 Reuse the same Idempotency-Key to retry a request; use a new key for a new operation.
                                 A replay returns the original transaction with HTTP 200; a new posting returns HTTP 201.
 
-                                Reversals return the exact original amounts. Reconciliation is on demand for completed
+                                Reversals return the exact original amounts. Reconciliation reports cover completed
                                 UTC months; months before account creation report unavailable history.
+                                Automatic checks run on startup and monthly by default, with results in the application logs.
                                 """))
                 .addTagsItem(new Tag().name("Accounts").description("Current balances and chronological transaction history"))
                 .addTagsItem(new Tag().name("Transactions").description("Atomic transfers and full reversals"))

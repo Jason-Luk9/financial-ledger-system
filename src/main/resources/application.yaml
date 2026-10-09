@@ -20,6 +20,10 @@ ledger:
   fx:
     usd-to-sgd: ${USD_TO_SGD:1.25}
     sgd-to-usd: ${SGD_TO_USD:0.80}
+  reconciliation:
+    schedule:
+      enabled: ${RECONCILIATION_SCHEDULE_ENABLED:true}
+      cron: ${RECONCILIATION_SCHEDULE_CRON:0 5 0 1 * *}
 springdoc:
   override-with-generic-response: false
   swagger-ui:
